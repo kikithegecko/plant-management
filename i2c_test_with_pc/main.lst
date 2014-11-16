@@ -1,0 +1,146 @@
+   1               		.file	"main.c"
+   2               	__SREG__ = 0x3f
+   3               	__SP_H__ = 0x3e
+   4               	__SP_L__ = 0x3d
+   5               	__tmp_reg__ = 0
+   6               	__zero_reg__ = 1
+   7               		.global __do_copy_data
+   8               		.global __do_clear_bss
+   9               		.text
+  10               	.Ltext0:
+  11               	.global	init
+  13               	init:
+  14               	.LFB0:
+  15               		.file 1 "main.c"
+   1:main.c        **** #define F_CPU 16000000L
+   2:main.c        **** 
+   3:main.c        **** #define LOW_BYTE(x)  (x & 0xff)
+   4:main.c        **** #define HIGH_BYTE(x) ((x >> 8) & 0xff)
+   5:main.c        **** #define REJOIN(LO, HI) ((HI << 8) | LO)
+   6:main.c        **** 
+   7:main.c        **** //#include<stdlib.h>
+   8:main.c        **** #include<avr/io.h>
+   9:main.c        **** #include<avr/interrupt.h>
+  10:main.c        **** #include<avr/pgmspace.h>
+  11:main.c        **** #include "twislave.h"
+  12:main.c        **** 
+  13:main.c        **** #define SLAVE_ADDR 0x50
+  14:main.c        **** 
+  15:main.c        **** uint16_t var1, var2;
+  16:main.c        **** uint16_t buffer;
+  17:main.c        **** 
+  18:main.c        **** /* This function sets the address */
+  19:main.c        **** void init(){
+  16               		.loc 1 19 0
+  17               	/* prologue: function */
+  18               	/* frame size = 0 */
+  19               	/* stack size = 0 */
+  20               	.L__stack_usage = 0
+  20:main.c        **** 
+  21:main.c        **** 	cli(); // clear interrupts
+  21               		.loc 1 21 0
+  22               	/* #APP */
+  23               	 ;  21 "main.c" 1
+  24 0000 F894      		cli
+  25               	 ;  0 "" 2
+  22:main.c        **** 	init_twi_slave(SLAVE_ADDR);
+  26               		.loc 1 22 0
+  27               	/* #NOAPP */
+  28 0002 80E5      		ldi r24,lo8(80)
+  29 0004 0E94 0000 		call init_twi_slave
+  23:main.c        **** 	sei(); // set enable interrupts
+  30               		.loc 1 23 0
+  31               	/* #APP */
+  32               	 ;  23 "main.c" 1
+  33 0008 7894      		sei
+  34               	 ;  0 "" 2
+  35               	/* epilogue start */
+  24:main.c        **** 
+  25:main.c        **** }
+  36               		.loc 1 25 0
+  37               	/* #NOAPP */
+  38 000a 0895      		ret
+  39               	.LFE0:
+  41               		.section	.text.startup,"ax",@progbits
+  42               	.global	main
+  44               	main:
+  45               	.LFB1:
+  26:main.c        **** 
+  27:main.c        **** /* main is here! */
+  28:main.c        **** int main(){
+  46               		.loc 1 28 0
+  47               	/* prologue: function */
+  48               	/* frame size = 0 */
+  49               	/* stack size = 0 */
+  50               	.L__stack_usage = 0
+  29:main.c        **** 	
+  30:main.c        **** 	init();
+  51               		.loc 1 30 0
+  52 0000 0E94 0000 		call init
+  31:main.c        **** 
+  32:main.c        **** 	while(1){
+  33:main.c        **** 
+  34:main.c        **** 		// receiving two bytes of data (supposed to be 42 and 23)
+  35:main.c        **** 		var1 = rxbuffer[0];
+  36:main.c        **** 		var2 = rxbuffer[1];
+  37:main.c        **** 
+  38:main.c        **** 		//send Feedback
+  39:main.c        **** 		if((var1 == 42) && (var2 == 23)){
+  40:main.c        **** 			txbuffer[0] = 1;
+  53               		.loc 1 40 0
+  54 0004 81E0      		ldi r24,lo8(1)
+  55               	.L6:
+  35:main.c        **** 		var1 = rxbuffer[0];
+  56               		.loc 1 35 0
+  57 0006 2091 0000 		lds r18,rxbuffer
+  36:main.c        **** 		var2 = rxbuffer[1];
+  58               		.loc 1 36 0
+  59 000a 9091 0000 		lds r25,rxbuffer+1
+  39:main.c        **** 		if((var1 == 42) && (var2 == 23)){
+  60               		.loc 1 39 0
+  61 000e 2A32      		cpi r18,lo8(42)
+  62 0010 01F4      		brne .L4
+  39:main.c        **** 		if((var1 == 42) && (var2 == 23)){
+  63               		.loc 1 39 0 is_stmt 0 discriminator 1
+  64 0012 9731      		cpi r25,lo8(23)
+  65 0014 01F4      		brne .L4
+  66               		.loc 1 40 0 is_stmt 1
+  67 0016 8093 0000 		sts txbuffer,r24
+  68 001a 00C0      		rjmp .L6
+  69               	.L4:
+  41:main.c        **** 		}
+  42:main.c        **** 		else{
+  43:main.c        **** 			txbuffer[0] = 0;
+  70               		.loc 1 43 0
+  71 001c 1092 0000 		sts txbuffer,__zero_reg__
+  72 0020 00C0      		rjmp .L6
+  73               	.LFE1:
+  75               		.comm buffer,2,1
+  76               		.comm var2,2,1
+  77               		.comm var1,2,1
+  78               		.comm buffer_adr,1,1
+  79               		.comm txbuffer,20,1
+  80               		.comm rxbuffer,20,1
+ 115               	.Letext0:
+ 116               		.file 2 "/usr/lib/gcc/avr/4.6.1/../../../../avr/include/stdint.h"
+ 117               		.file 3 "twislave.h"
+DEFINED SYMBOLS
+                            *ABS*:00000000 main.c
+     /tmp/cce4IPQf.s:2      *ABS*:0000003f __SREG__
+     /tmp/cce4IPQf.s:3      *ABS*:0000003e __SP_H__
+     /tmp/cce4IPQf.s:4      *ABS*:0000003d __SP_L__
+     /tmp/cce4IPQf.s:5      *ABS*:00000000 __tmp_reg__
+     /tmp/cce4IPQf.s:6      *ABS*:00000001 __zero_reg__
+     /tmp/cce4IPQf.s:13     .text:00000000 init
+     /tmp/cce4IPQf.s:44     .text.startup:00000000 main
+                            *COM*:00000014 rxbuffer
+                            *COM*:00000014 txbuffer
+                            *COM*:00000002 buffer
+                            *COM*:00000002 var2
+                            *COM*:00000002 var1
+                            *COM*:00000001 buffer_adr
+
+UNDEFINED SYMBOLS
+__do_copy_data
+__do_clear_bss
+init_twi_slave

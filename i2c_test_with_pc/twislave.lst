@@ -1,0 +1,334 @@
+   1               		.file	"twislave.c"
+   2               	__SREG__ = 0x3f
+   3               	__SP_H__ = 0x3e
+   4               	__SP_L__ = 0x3d
+   5               	__tmp_reg__ = 0
+   6               	__zero_reg__ = 1
+   7               		.global __do_copy_data
+   8               		.global __do_clear_bss
+   9               		.text
+  10               	.Ltext0:
+  11               	.global	init_twi_slave
+  13               	init_twi_slave:
+  14               	.LFB0:
+  15               		.file 1 "twislave.c"
+   1:twislave.c    **** /*#################################################################################################
+   2:twislave.c    **** 	Title	: TWI SLave
+   3:twislave.c    **** 	Author	: Martin Junghans <jtronics@gmx.de>
+   4:twislave.c    **** 	Hompage	: www.jtronics.de
+   5:twislave.c    **** 	Software: AVR-GCC / Programmers Notpad 2
+   6:twislave.c    **** 	License	: GNU General Public License 
+   7:twislave.c    **** 	
+   8:twislave.c    **** 	Aufgabe	:
+   9:twislave.c    **** 	Betrieb eines AVRs mit Hardware-TWI-Schnittstelle als Slave. 
+  10:twislave.c    **** 	Zu Beginn muss init_twi_slave mit der gewünschten Slave-Adresse als Parameter aufgerufen werden. 
+  11:twislave.c    **** 	Der Datenaustausch mit dem Master erfolgt über die Buffer rxbuffer und txbuffer, auf die von Maste
+  12:twislave.c    **** 	rxbuffer und txbuffer sind globale Variablen (Array aus uint8_t).
+  13:twislave.c    **** 	
+  14:twislave.c    **** 	Ablauf:
+  15:twislave.c    **** 	Die Ansteuerung des rxbuffers, in den der Master schreiben kann, erfolgt ähnlich wie bei einem nor
+  16:twislave.c    **** 	Man sendet zunächst die Bufferposition, an die man schreiben will, und dann die Daten. Die Bufferp
+  17:twislave.c    **** 	automatisch hochgezählt, sodass man mehrere Datenbytes hintereinander schreiben kann, ohne jedesma
+  18:twislave.c    **** 	die Bufferadresse zu schreiben.
+  19:twislave.c    **** 	Um den txbuffer vom Master aus zu lesen, überträgt man zunächst in einem Schreibzugriff die gewüns
+  20:twislave.c    **** 	liest dann nach einem repeated start die Daten aus. Die Bufferposition wird automatisch hochgezähl
+  21:twislave.c    **** 	Datenbytes hintereinander lesen kann, ohne jedesmal die Bufferposition zu schreiben.
+  22:twislave.c    **** 
+  23:twislave.c    **** 	Abgefangene Fehlbedienung durch den Master:
+  24:twislave.c    **** 	- Lesen über die Grenze des txbuffers hinaus
+  25:twislave.c    **** 	- Schreiben über die Grenzen des rxbuffers hinaus
+  26:twislave.c    **** 	- Angabe einer ungültigen Schreib/Lese-Adresse
+  27:twislave.c    **** 	- Lesezuggriff, ohne vorher Leseadresse geschrieben zu haben
+  28:twislave.c    **** 	
+  29:twislave.c    **** 	LICENSE:
+  30:twislave.c    ****     This program is free software; you can redistribute it and/or modify
+  31:twislave.c    ****     it under the terms of the GNU General Public License as published by
+  32:twislave.c    ****     the Free Software Foundation; either version 2 of the License, or
+  33:twislave.c    ****     any later version.
+  34:twislave.c    **** 
+  35:twislave.c    ****     This program is distributed in the hope that it will be useful,
+  36:twislave.c    ****     but WITHOUT ANY WARRANTY; without even the implied warranty of
+  37:twislave.c    ****     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  38:twislave.c    ****     GNU General Public License for more details.
+  39:twislave.c    **** 
+  40:twislave.c    **** //#################################################################################################
+  41:twislave.c    **** 
+  42:twislave.c    **** #include <util/twi.h> 								// Bezeichnungen für Statuscodes in TWSR
+  43:twislave.c    **** #include <avr/interrupt.h> 							// behandlung der Interrupts
+  44:twislave.c    **** #include <stdint.h> 								// definiert Datentyp uint8_t
+  45:twislave.c    **** #include "twislave.h" 								
+  46:twislave.c    **** 
+  47:twislave.c    **** //#################################### Macros
+  48:twislave.c    **** //ACK nach empfangenen Daten senden/ ACK nach gesendeten Daten erwarten
+  49:twislave.c    **** #define TWCR_ACK 	TWCR = (1<<TWEN)|(1<<TWIE)|(1<<TWINT)|(1<<TWEA)|(0<<TWSTA)|(0<<TWSTO)|(0<<TWWC); 
+  50:twislave.c    **** 
+  51:twislave.c    **** //NACK nach empfangenen Daten senden/ NACK nach gesendeten Daten erwarten     
+  52:twislave.c    **** #define TWCR_NACK 	TWCR = (1<<TWEN)|(1<<TWIE)|(1<<TWINT)|(0<<TWEA)|(0<<TWSTA)|(0<<TWSTO)|(0<<TWWC);
+  53:twislave.c    **** 
+  54:twislave.c    **** //switched to the non adressed slave mode...
+  55:twislave.c    **** #define TWCR_RESET 	TWCR = (1<<TWEN)|(1<<TWIE)|(1<<TWINT)|(1<<TWEA)|(0<<TWSTA)|(0<<TWSTO)|(0<<TWWC)
+  56:twislave.c    **** 
+  57:twislave.c    **** //########################################################################################## init_t
+  58:twislave.c    **** void init_twi_slave(uint8_t adr)
+  59:twislave.c    **** {
+  16               		.loc 1 59 0
+  17               	.LVL0:
+  18               	/* prologue: function */
+  19               	/* frame size = 0 */
+  20               	/* stack size = 0 */
+  21               	.L__stack_usage = 0
+  60:twislave.c    **** 	TWAR= adr; //Adresse setzen
+  22               		.loc 1 60 0
+  23 0000 8093 BA00 		sts 186,r24
+  61:twislave.c    **** 	TWCR &= ~(1<<TWSTA)|(1<<TWSTO);
+  24               		.loc 1 61 0
+  25 0004 ECEB      		ldi r30,lo8(188)
+  26 0006 F0E0      		ldi r31,hi8(188)
+  27 0008 8081      		ld r24,Z
+  28               	.LVL1:
+  29 000a 8F7D      		andi r24,lo8(-33)
+  30 000c 8083      		st Z,r24
+  62:twislave.c    **** 	TWCR|= (1<<TWEA) | (1<<TWEN)|(1<<TWIE); 	
+  31               		.loc 1 62 0
+  32 000e 8081      		ld r24,Z
+  33 0010 8564      		ori r24,lo8(69)
+  34 0012 8083      		st Z,r24
+  63:twislave.c    **** 	buffer_adr=0xFF;  
+  35               		.loc 1 63 0
+  36 0014 8FEF      		ldi r24,lo8(-1)
+  37 0016 8093 0000 		sts buffer_adr,r24
+  64:twislave.c    **** 	sei();
+  38               		.loc 1 64 0
+  39               	/* #APP */
+  40               	 ;  64 "twislave.c" 1
+  41 001a 7894      		sei
+  42               	 ;  0 "" 2
+  43               	/* epilogue start */
+  65:twislave.c    **** }
+  44               		.loc 1 65 0
+  45               	/* #NOAPP */
+  46 001c 0895      		ret
+  47               	.LFE0:
+  49               	.global	__vector_24
+  51               	__vector_24:
+  52               	.LFB1:
+  66:twislave.c    **** 
+  67:twislave.c    **** //########################################################################################## ISR (T
+  68:twislave.c    **** //ISR, die bei einem Ereignis auf dem Bus ausgelöst wird. Im Register TWSR befindet sich dann 
+  69:twislave.c    **** //ein Statuscode, anhand dessen die Situation festgestellt werden kann.
+  70:twislave.c    **** ISR (TWI_vect)  
+  71:twislave.c    **** {
+  53               		.loc 1 71 0
+  54 001e 1F92      		push r1
+  55               	.LCFI0:
+  56 0020 0F92      		push r0
+  57               	.LCFI1:
+  58 0022 0FB6      		in r0,__SREG__
+  59 0024 0F92      		push r0
+  60 0026 1124      		clr __zero_reg__
+  61 0028 8F93      		push r24
+  62               	.LCFI2:
+  63 002a 9F93      		push r25
+  64               	.LCFI3:
+  65 002c EF93      		push r30
+  66               	.LCFI4:
+  67 002e FF93      		push r31
+  68               	.LCFI5:
+  69               	/* prologue: Signal */
+  70               	/* frame size = 0 */
+  71               	/* stack size = 7 */
+  72               	.L__stack_usage = 7
+  73               	.LVL2:
+  72:twislave.c    **** 	uint8_t data=0;
+  73:twislave.c    **** 	switch (TW_STATUS) 								// TWI-Statusregister prüfen und nötige Aktion bestimmen 
+  74               		.loc 1 73 0
+  75 0030 8091 B900 		lds r24,185
+  76 0034 90E0      		ldi r25,lo8(0)
+  77 0036 887F      		andi r24,lo8(248)
+  78 0038 9070      		andi r25,hi8(248)
+  79 003a 8038      		cpi r24,128
+  80 003c 9105      		cpc r25,__zero_reg__
+  81 003e 01F0      		breq .L5
+  82 0040 8138      		cpi r24,129
+  83 0042 9105      		cpc r25,__zero_reg__
+  84 0044 04F4      		brge .L7
+  85 0046 8036      		cpi r24,96
+  86 0048 9105      		cpc r25,__zero_reg__
+  87 004a 01F4      		brne .L3
+  88 004c 00C0      		rjmp .L18
+  89               	.L7:
+  90 004e 883A      		cpi r24,168
+  91 0050 9105      		cpc r25,__zero_reg__
+  92 0052 01F0      		breq .L6
+  93 0054 883B      		cpi r24,184
+  94 0056 9105      		cpc r25,__zero_reg__
+  95 0058 01F4      		brne .L3
+  96 005a 00C0      		rjmp .L6
+  97               	.L18:
+  74:twislave.c    **** 		{
+  75:twislave.c    **** 		case TW_SR_SLA_ACK: 						// 0x60 Slave Receiver, wurde adressiert	
+  76:twislave.c    **** 			TWCR_ACK; 								// nächstes Datenbyte empfangen, ACK danach
+  98               		.loc 1 76 0
+  99 005c 85EC      		ldi r24,lo8(-59)
+ 100 005e 8093 BC00 		sts 188,r24
+  77:twislave.c    **** 			buffer_adr=0xFF; 						// Bufferposition ist undefiniert
+ 101               		.loc 1 77 0
+ 102 0062 8FEF      		ldi r24,lo8(-1)
+ 103 0064 8093 0000 		sts buffer_adr,r24
+  78:twislave.c    **** 			break;
+ 104               		.loc 1 78 0
+ 105 0068 00C0      		rjmp .L2
+ 106               	.L5:
+  79:twislave.c    **** 
+  80:twislave.c    **** 		case TW_SR_DATA_ACK: 						// 0x80 Slave Receiver,Daten empfangen
+  81:twislave.c    **** 			data=TWDR; 								// Empfangene Daten auslesen
+ 107               		.loc 1 81 0
+ 108 006a 8091 BB00 		lds r24,187
+ 109               	.LVL3:
+  82:twislave.c    **** 			if (buffer_adr == 0xFF) 				// erster Zugriff, Bufferposition setzen
+ 110               		.loc 1 82 0
+ 111 006e 9091 0000 		lds r25,buffer_adr
+ 112 0072 9F3F      		cpi r25,lo8(-1)
+ 113 0074 01F4      		brne .L9
+  83:twislave.c    **** 				{
+  84:twislave.c    **** 					if(data<=buffer_size)			// Kontrolle ob gewünschte Adresse im erlaubten bereich
+ 114               		.loc 1 84 0
+ 115 0076 8531      		cpi r24,lo8(21)
+ 116 0078 00F4      		brsh .L10
+  85:twislave.c    **** 						{
+  86:twislave.c    **** 							buffer_adr= data; 		// Bufferposition wie adressiert setzen
+ 117               		.loc 1 86 0
+ 118 007a 8093 0000 		sts buffer_adr,r24
+ 119 007e 00C0      		rjmp .L3
+ 120               	.L10:
+  87:twislave.c    **** 						}
+  88:twislave.c    **** 					else
+  89:twislave.c    **** 						{
+  90:twislave.c    **** 						buffer_adr=0; 				// Adresse auf Null setzen. Ist das sinnvoll?
+ 121               		.loc 1 90 0
+ 122 0080 1092 0000 		sts buffer_adr,__zero_reg__
+ 123 0084 00C0      		rjmp .L3
+ 124               	.L9:
+  91:twislave.c    **** 						}				
+  92:twislave.c    **** 					TWCR_ACK;						// nächstes Datenbyte empfangen, ACK danach, um nächstes Byte anzufordern
+  93:twislave.c    **** 				}
+  94:twislave.c    **** 			else 									// weiterer Zugriff, Daten empfangen
+  95:twislave.c    **** 				{
+  96:twislave.c    **** 					rxbuffer[buffer_adr]=data; 		// Daten in Buffer schreiben
+ 125               		.loc 1 96 0
+ 126 0086 E091 0000 		lds r30,buffer_adr
+ 127 008a F0E0      		ldi r31,lo8(0)
+ 128 008c E050      		subi r30,lo8(-(rxbuffer))
+ 129 008e F040      		sbci r31,hi8(-(rxbuffer))
+ 130 0090 8083      		st Z,r24
+ 131 0092 00C0      		rjmp .L17
+ 132               	.LVL4:
+ 133               	.L6:
+  97:twislave.c    **** 					buffer_adr++; 					// Buffer-Adresse weiterzählen für nächsten Schreibzugriff
+  98:twislave.c    **** 					if(buffer_adr<(buffer_size-1)) // im Buffer ist noch Platz für mehr als ein Byte
+  99:twislave.c    **** 						{
+ 100:twislave.c    **** 							TWCR_ACK;				// nächstes Datenbyte empfangen, ACK danach, um nächstes Byte anzufordern
+ 101:twislave.c    **** 						}
+ 102:twislave.c    **** 					else   							// es kann nur noch ein Byte kommen, dann ist der Buffer voll
+ 103:twislave.c    **** 						{
+ 104:twislave.c    **** 							TWCR_NACK;				// letztes Byte lesen, dann NACK, um vollen Buffer zu signaliseren
+ 105:twislave.c    **** 						}
+ 106:twislave.c    **** 				}
+ 107:twislave.c    **** 			break;
+ 108:twislave.c    **** 
+ 109:twislave.c    **** 		case TW_ST_SLA_ACK: 						//
+ 110:twislave.c    **** 		case TW_ST_DATA_ACK: 						// 0xB8 Slave Transmitter, weitere Daten wurden angefordert
+ 111:twislave.c    **** 
+ 112:twislave.c    **** 			if (buffer_adr == 0xFF) 				// zuvor keine Leseadresse angegeben! 
+ 134               		.loc 1 112 0
+ 135 0094 8091 0000 		lds r24,buffer_adr
+ 136 0098 8F3F      		cpi r24,lo8(-1)
+ 137 009a 01F4      		brne .L13
+ 113:twislave.c    **** 				{
+ 114:twislave.c    **** 					buffer_adr=0;
+ 138               		.loc 1 114 0
+ 139 009c 1092 0000 		sts buffer_adr,__zero_reg__
+ 140               	.L13:
+ 115:twislave.c    **** 				}	
+ 116:twislave.c    **** 			TWDR = txbuffer[buffer_adr]; 			// Datenbyte senden 
+ 141               		.loc 1 116 0
+ 142 00a0 E091 0000 		lds r30,buffer_adr
+ 143 00a4 F0E0      		ldi r31,lo8(0)
+ 144 00a6 E050      		subi r30,lo8(-(txbuffer))
+ 145 00a8 F040      		sbci r31,hi8(-(txbuffer))
+ 146 00aa 8081      		ld r24,Z
+ 147 00ac 8093 BB00 		sts 187,r24
+ 148               	.LVL5:
+ 149               	.L17:
+ 117:twislave.c    **** 			buffer_adr++; 							// bufferadresse für nächstes Byte weiterzählen
+ 150               		.loc 1 117 0
+ 151 00b0 8091 0000 		lds r24,buffer_adr
+ 152 00b4 8F5F      		subi r24,lo8(-(1))
+ 153 00b6 8093 0000 		sts buffer_adr,r24
+ 118:twislave.c    **** 			if(buffer_adr<(buffer_size-1)) 		// im Buffer ist mehr als ein Byte, das gesendet werden kann
+ 154               		.loc 1 118 0
+ 155 00ba 8091 0000 		lds r24,buffer_adr
+ 156 00be 8331      		cpi r24,lo8(19)
+ 157 00c0 00F0      		brlo .L3
+ 158               	.L14:
+ 119:twislave.c    **** 				{
+ 120:twislave.c    **** 					TWCR_ACK; 						// nächstes Byte senden, danach ACK erwarten
+ 121:twislave.c    **** 				}
+ 122:twislave.c    **** 			else
+ 123:twislave.c    **** 				{
+ 124:twislave.c    **** 					TWCR_NACK; 						// letztes Byte senden, danach NACK erwarten
+ 159               		.loc 1 124 0
+ 160 00c2 85E8      		ldi r24,lo8(-123)
+ 161 00c4 00C0      		rjmp .L15
+ 162               	.L3:
+ 125:twislave.c    **** 				}
+ 126:twislave.c    **** 			break;
+ 127:twislave.c    **** 
+ 128:twislave.c    **** 		case TW_ST_DATA_NACK: 						// 0xC0 Keine Daten mehr gefordert 
+ 129:twislave.c    **** 		case TW_SR_DATA_NACK: 						// 0x88 
+ 130:twislave.c    **** 		case TW_ST_LAST_DATA: 						// 0xC8  Last data byte in TWDR has been transmitted (TWEA = “0”); AC
+ 131:twislave.c    **** 		case TW_SR_STOP: 							// 0xA0 STOP empfangen
+ 132:twislave.c    **** 		default: 	
+ 133:twislave.c    **** 			TWCR_RESET; 							// Übertragung beenden, warten bis zur nächsten Adressierung
+ 163               		.loc 1 133 0
+ 164 00c6 85EC      		ldi r24,lo8(-59)
+ 165               	.L15:
+ 166 00c8 8093 BC00 		sts 188,r24
+ 167               	.L2:
+ 168               	/* epilogue start */
+ 134:twislave.c    **** 			break;	
+ 135:twislave.c    **** 		} //end.switch (TW_STATUS)
+ 136:twislave.c    **** } //end.ISR(TWI_vect)...
+ 169               		.loc 1 136 0
+ 170 00cc FF91      		pop r31
+ 171 00ce EF91      		pop r30
+ 172 00d0 9F91      		pop r25
+ 173 00d2 8F91      		pop r24
+ 174 00d4 0F90      		pop r0
+ 175 00d6 0FBE      		out __SREG__,r0
+ 176 00d8 0F90      		pop r0
+ 177 00da 1F90      		pop r1
+ 178 00dc 1895      		reti
+ 179               	.LFE1:
+ 181               		.comm buffer_adr,1,1
+ 182               		.comm txbuffer,20,1
+ 183               		.comm rxbuffer,20,1
+ 254               	.Letext0:
+ 255               		.file 2 "twislave.h"
+ 256               		.file 3 "/usr/lib/gcc/avr/4.6.1/../../../../avr/include/stdint.h"
+DEFINED SYMBOLS
+                            *ABS*:00000000 twislave.c
+     /tmp/ccqoTi4f.s:2      *ABS*:0000003f __SREG__
+     /tmp/ccqoTi4f.s:3      *ABS*:0000003e __SP_H__
+     /tmp/ccqoTi4f.s:4      *ABS*:0000003d __SP_L__
+     /tmp/ccqoTi4f.s:5      *ABS*:00000000 __tmp_reg__
+     /tmp/ccqoTi4f.s:6      *ABS*:00000001 __zero_reg__
+     /tmp/ccqoTi4f.s:13     .text:00000000 init_twi_slave
+                            *COM*:00000001 buffer_adr
+     /tmp/ccqoTi4f.s:51     .text:0000001e __vector_24
+                            *COM*:00000014 rxbuffer
+                            *COM*:00000014 txbuffer
+
+UNDEFINED SYMBOLS
+__do_copy_data
+__do_clear_bss

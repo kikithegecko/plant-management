@@ -1,0 +1,26 @@
+http://refarmthecity.org/wiki
+
+TEMPERATUR
+LM35
+
+FEUCHTIGKEIT
+you send 5V from the microcontroller
+the energy goes straight to one pole of the sensor
+the other pole receives electricity depending on the mount of water that carries free ions that exists on that 2.45mm distance
+so we use this transistor the 2N2222 
+wie kalibrieren?
+
+WASSERSTAND
+sensor am kanisterrand, alarm/pumpenstopp wenn wasserstand zu niedrig
+
+MIKROCONTROLLER 1 - PFLANZE
+misst temperatur und feuchte
+wenn beduerfnis unerfuellt -> signal auf bus+ventil auf
+wenn ventil auf, signal über bus an pumpencontroller -> log
+feste bewässerungszeit?
+i²c-slave
+
+MIKROCONTROLLER 2 - PUMPE/DATA
+wenn wassersignal angekommen, pumpe anwerfen
+zeit und plfanze aufschreiben, die wasser braucht
+i²c-master
